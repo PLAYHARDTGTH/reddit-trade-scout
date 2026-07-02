@@ -1,0 +1,6 @@
+node_modules/
+.reddit-profile/
+output/
+history.json
+AGENTS.md
+当前窗口对话记录_*.md

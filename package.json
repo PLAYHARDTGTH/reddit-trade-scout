@@ -1,0 +1,16 @@
+{
+  "name": "reddit-trade-scout",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "login": "node reddit.mjs login",
+    "scan": "node reddit.mjs scan",
+    "shortlist": "node reddit.mjs shortlist",
+    "mark": "node reddit.mjs mark",
+    "codegen": "playwright codegen --channel=chrome --user-data-dir=.reddit-profile https://www.reddit.com/",
+    "test": "node reddit.mjs self-test"
+  },
+  "dependencies": {
+    "playwright": "1.61.1"
+  }
+}
