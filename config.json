@@ -1,4 +1,8 @@
 {
+  "dailyActions": {
+    "upvotes": [3, 5],
+    "comments": [1, 3]
+  },
   "queries": [
     "subreddit:ROS agricultural robot",
     "subreddit:robotics autonomous farm robot",
