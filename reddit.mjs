@@ -8,6 +8,7 @@ const root = path.dirname(new URL(import.meta.url).pathname);
 const profileDir = path.join(root, ".reddit-profile");
 const outputDir = path.join(root, "output");
 const historyPath = path.join(root, "history.json");
+const dailyPlanPath = path.join(outputDir, "daily-plan.json");
 
 function isEnglish(text) {
   const letters = text.match(/\p{L}/gu) ?? [];
@@ -45,6 +46,24 @@ function parseCount(value) {
   return Math.round(Number(match[1]) * ({ K: 1_000, M: 1_000_000 }[match[2]?.toUpperCase()] ?? 1));
 }
 
+function pickFromRange([min, max], random = Math.random) {
+  return Math.floor(random() * (max - min + 1)) + min;
+}
+
+function localDateKey(date = new Date()) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+function targetInRange(value, [min, max]) {
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+function validateRange(name, range) {
+  if (!Array.isArray(range) || range.length !== 2 || range.some((value) => !Number.isInteger(value) || value < 0) || range[0] > range[1]) {
+    throw new Error(`config.json: dailyActions.${name} 必须是 [最小值, 最大值]`);
+  }
+}
+
 function validateConfig(config) {
   for (const key of ["queries", "includeKeywords", "contextKeywords", "excludeKeywords"]) {
     if (!Array.isArray(config[key]) || config[key].some((item) => typeof item !== "string")) {
@@ -59,6 +78,7 @@ function validateConfig(config) {
   if (!config.queries.length || !config.includeKeywords.length) {
     throw new Error("config.json: queries 和 includeKeywords 不能为空");
   }
+  for (const key of ["upvotes", "comments"]) validateRange(key, config.dailyActions?.[key]);
   return config;
 }
 
@@ -76,6 +96,28 @@ async function loadHistory(filePath = historyPath) {
   }
   if (!Array.isArray(history.items)) throw new Error("history.json: items 必须是数组");
   return history;
+}
+
+async function loadDailyTargets(config) {
+  const date = localDateKey();
+  try {
+    const saved = JSON.parse(await readFile(dailyPlanPath, "utf8"));
+    if (
+      saved.date === date &&
+      targetInRange(saved.upvotes, config.dailyActions.upvotes) &&
+      targetInRange(saved.comments, config.dailyActions.comments)
+    ) return saved;
+  } catch (error) {
+    if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+  }
+
+  const targets = {
+    date,
+    upvotes: pickFromRange(config.dailyActions.upvotes),
+    comments: pickFromRange(config.dailyActions.comments),
+  };
+  await writeFile(dailyPlanPath, `${JSON.stringify(targets, null, 2)}\n`);
+  return targets;
 }
 
 async function launch() {
@@ -190,6 +232,32 @@ async function loadSearch(page, query, config) {
   return extractPosts(page);
 }
 
+async function inspectCandidate(page, url) {
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  } catch (error) {
+    if (canonicalUrl(page.url()) !== canonicalUrl(url)) throw error;
+  }
+
+  const posts = page.locator("shreddit-post");
+  await posts.first().waitFor({ state: "attached", timeout: 15_000 });
+  const body = await posts.evaluateAll((nodes) => {
+    const node = nodes[0];
+    const content = node?.querySelector('[slot="text-body"], [data-post-click-location="text-body"]');
+    return (content?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 1_200);
+  });
+
+  const comments = page.locator("shreddit-comment");
+  await comments.first().waitFor({ state: "attached", timeout: 4_000 }).catch(() => {});
+  const topComments = await comments.evaluateAll((nodes) =>
+    nodes.slice(0, 3).map((node) => {
+      const content = node.querySelector('[slot="comment"]') || node;
+      return (content.innerText || "").replace(/\s+/g, " ").trim().slice(0, 350);
+    }).filter(Boolean),
+  );
+  return { body, topComments };
+}
+
 async function withTimeout(promise, milliseconds, message) {
   let timer;
   try {
@@ -234,10 +302,13 @@ async function scan() {
   const history = await loadHistory();
   const handled = new Set(history.items.map((item) => canonicalUrl(item.url)).filter(Boolean));
   await mkdir(outputDir, { recursive: true });
+  const dailyTargets = await loadDailyTargets(config);
   const context = await launch();
   const page = context.pages()[0] ?? (await context.newPage());
   const found = new Map();
   const errors = [];
+  let candidates = [];
+  const briefs = [];
 
   try {
     for (const query of config.queries) {
@@ -266,25 +337,39 @@ async function scan() {
         console.warn(`跳过：${query}（${error.message}）`);
       }
     }
+
+    candidates = [...found.values()]
+      .sort((a, b) => b.relevance - a.relevance || Date.parse(b.created || 0) - Date.parse(a.created || 0))
+      .slice(0, config.maxCandidates);
+    const briefCount = Math.min(candidates.length, dailyTargets.upvotes + dailyTargets.comments + 2);
+    console.log(`生成精简摘要：${briefCount} 条`);
+    for (const [index, item] of candidates.slice(0, briefCount).entries()) {
+      try {
+        briefs.push({ index: index + 1, ...item, ...(await inspectCandidate(page, item.url)) });
+      } catch (error) {
+        briefs.push({ index: index + 1, ...item, inspectError: error.message });
+      }
+    }
   } finally {
     await context.close();
   }
 
-  const candidates = [...found.values()]
-    .sort((a, b) => b.relevance - a.relevance || Date.parse(b.created || 0) - Date.parse(a.created || 0))
-    .slice(0, config.maxCandidates);
   const generatedAt = new Date().toISOString();
   const jsonPath = path.join(outputDir, "candidates.json");
+  const briefPath = path.join(outputDir, "brief.json");
   const htmlPath = path.join(outputDir, "candidates.html");
-  await writeFile(jsonPath, JSON.stringify({ generatedAt, errors, candidates }, null, 2));
+  await writeFile(jsonPath, JSON.stringify({ generatedAt, dailyTargets, errors, candidates }, null, 2));
+  await writeFile(briefPath, JSON.stringify({ generatedAt, dailyTargets, items: briefs }, null, 2));
   await writeFile(htmlPath, renderHtml(candidates, generatedAt));
-  console.log(`完成：${candidates.length} 条候选帖，${errors.length} 个搜索失败\n打开：${htmlPath}`);
+  console.log(`完成：${candidates.length} 条候选帖，${errors.length} 个搜索失败`);
+  console.log(`今日目标：${dailyTargets.upvotes} 赞、${dailyTargets.comments} 评\n精简摘要：${briefPath}\n打开：${htmlPath}`);
   if (!candidates.length && errors.length === config.queries.length) process.exitCode = 1;
 }
 
 async function shortlist() {
   const result = JSON.parse(await readFile(path.join(outputDir, "candidates.json"), "utf8"));
   if (!Array.isArray(result.candidates)) throw new Error("请先运行 npm run scan");
+  if (result.dailyTargets) console.log(`今日目标：${result.dailyTargets.upvotes} 赞、${result.dailyTargets.comments} 评`);
   for (const [index, item] of result.candidates.slice(0, 5).entries()) {
     console.log(`${index + 1}. [${item.subreddit}] ${item.title}\n   ${item.url}`);
   }
@@ -325,6 +410,7 @@ async function mark() {
 }
 
 async function selfTest() {
+  await loadConfig();
   const config = {
     includeKeywords: ["robot", "zinc"],
     contextKeywords: ["farm", "zinc"],
@@ -338,6 +424,10 @@ async function selfTest() {
   console.assert(!hasContext("Pet robot", config));
   console.assert(parseCount("1.2K") === 1200);
   console.assert(parseCount("38") === 38);
+  console.assert(pickFromRange([1, 3], () => 0) === 1);
+  console.assert(pickFromRange([1, 3], () => 0.999_999) === 3);
+  console.assert(targetInRange(3, [3, 5]));
+  console.assert(!targetInRange(6, [3, 5]));
   console.assert(canonicalUrl("/r/ROS/comments/abc123/a_title/?x=1") === "https://www.reddit.com/r/ROS/comments/abc123/a_title/");
   const history = { items: [] };
   const candidate = { title: "Farm robot", url: "/r/ROS/comments/abc123/a_title/" };

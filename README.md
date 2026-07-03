@@ -18,7 +18,9 @@ npm run scan
 npm run shortlist
 ```
 
-扫描会打开一个专用 Playwright 窗口，并在整个扫描过程中复用同一个页面，不再为每个搜索词反复开关页面。Codex 从短名单中分析帖子并给出建议；用户确认后，Codex 才接管你当前已登录的普通 Chrome Reddit 标签页进行点赞或评论，再记录结果：
+扫描会打开一个专用 Playwright 窗口，并在整个扫描过程中复用同一个页面，不再为每个搜索词反复开关页面。每天首次扫描会从 `config.json` 的区间中抽取一次目标数量，默认点赞 3–5、评论 1–3；同一天重跑沿用 `output/daily-plan.json`，不会重复抽取。
+
+扫描还会生成 `output/brief.json`，只保存前若干候选的有限正文和前三条评论，供 Codex 分析，避免读取整页 DOM、广告和大段无关内容。Codex 给出建议并由用户确认后，才接管当前已登录的普通 Chrome Reddit 标签页进行点赞或评论，再记录结果：
 
 ```bash
 npm run mark -- 1 upvote
@@ -26,9 +28,18 @@ npm run mark -- 2 comment "comment permalink"
 npm run mark -- 3 skip
 ```
 
-已处理帖子保存在本机自动创建的 `history.json`，后续扫描会自动排除；该文件不会上传到 GitHub。完整候选页面是 `output/candidates.html`；搜索词在 `config.json` 中修改。
+已处理帖子保存在本机自动创建的 `history.json`，后续扫描会自动排除；该文件不会上传到 GitHub。完整候选页面是 `output/candidates.html`；精简摘要、每日目标和搜索词分别保存在 `output/brief.json`、`output/daily-plan.json` 和 `config.json`。
 
 扫描、登录和 Codegen 不要同时运行；它们共用同一个本地浏览器配置目录。
+
+## 更新记录
+
+### 2026-07-03
+
+- 新增每日随机目标：点赞 3–5、评论 1–3；同一天重复扫描沿用同一目标。
+- 新增 `output/brief.json`，正文最多保留 1200 字符，每帖最多保留 3 条、每条 350 字符的评论，用于减少模型上下文。
+- 保留人工确认：脚本只扫描和生成建议，点赞及评论仍在用户确认后执行。
+- 已通过自检和一次真实只读扫描：7 条候选、6 条精简摘要、0 个搜索失败、0 个摘要提取失败。
 
 ## 页面改版时
 
