@@ -252,8 +252,15 @@ async function inspectCandidate(page, url) {
   const topComments = await comments.evaluateAll((nodes) =>
     nodes.slice(0, 3).map((node) => {
       const content = node.querySelector('[slot="comment"]') || node;
-      return (content.innerText || "").replace(/\s+/g, " ").trim().slice(0, 350);
-    }).filter(Boolean),
+      const id = node.getAttribute("comment-id") || node.getAttribute("thingid")?.replace(/^t1_/, "");
+      const postPath = location.pathname.match(/^\/r\/[^/]+\/comments\/[^/]+/)?.[0];
+      const permalink = node.getAttribute("permalink") || node.querySelector('a[href*="/comment/"]')?.getAttribute("href") || (id && postPath ? `${postPath}/comment/${id}/` : "");
+      return {
+        text: (content.innerText || "").replace(/\s+/g, " ").trim().slice(0, 350),
+        url: permalink ? new URL(permalink, location.origin).href : "",
+        score: Number(node.getAttribute("score") || 0),
+      };
+    }).filter((item) => item.text),
   );
   return { body, topComments };
 }
