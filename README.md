@@ -47,6 +47,11 @@ cp -R skills/run-reddit-opencli-workflow ~/.codex/skills/
 
 ## 更新记录
 
+### 2026-07-09
+
+- 备份 `run-reddit-opencli-workflow` Codex Skill 到仓库，放在 `skills/run-reddit-opencli-workflow/`。
+- README 增加 Skill 安装说明，clone 后可把该目录复制到 `~/.codex/skills/` 使用。
+
 ### 2026-07-06
 
 - 增加全站经济、金融和搞笑视频热门搜索，不再只依赖固定行业板块。
