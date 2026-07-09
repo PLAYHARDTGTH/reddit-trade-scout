@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reddit OpenCLI 工作流"
+  short_description: "用 OpenCLI 低 Token 执行 Reddit 筛选与核验"
+  default_prompt: "使用 $run-reddit-opencli-workflow 执行今天的 Reddit 完整流程。"

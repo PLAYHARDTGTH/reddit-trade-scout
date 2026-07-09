@@ -32,6 +32,19 @@ npm run mark -- 3 skip
 
 扫描、登录和 Codegen 不要同时运行；它们共用同一个本地浏览器配置目录。
 
+## Codex Skill
+
+配套 Skill 已备份在 `skills/run-reddit-opencli-workflow/`。它不是独立项目，和脚本放在同一仓库，方便 clone 后同时拿到运行规则和代码。
+
+如需安装到本机 Codex：
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R skills/run-reddit-opencli-workflow ~/.codex/skills/
+```
+
+安装后重启 Codex，再用自然语言说“执行完整流程”即可。实际执行仍需要本机已配置 OpenCLI、Chrome Browser Bridge，并且 Reddit 账号已登录。
+
 ## 更新记录
 
 ### 2026-07-06
